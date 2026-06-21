@@ -355,7 +355,7 @@ character with the most successes wins
 	check_flags = DISC_CHECK_CONSCIOUS
 	target_type = TARGET_PLAYER
 	vitae_cost = 0
-	cooldown_length = 3 SCENES
+	cooldown_length = 1 TURNS // To prevent implant spam.
 	range = 7
 	var/telepathy_types = list(TELEPATHY_MIND_READING, TELEPATHY_IMPLANT_THOUGHT)
 	var/telepathy_type_selected
@@ -363,7 +363,7 @@ character with the most successes wins
 	var/disguised_voice
 	var/datum/storyteller_roll/telepathy_success/telepathy_roll
 	var/datum/storyteller_roll/disguise_voice_roll/disguise_roll
-
+	COOLDOWN_DECLARE(mind_read_cd)
 /datum/storyteller_roll/telepathy_success
 	bumper_text = "mind reading"
 	applicable_stats = list(STAT_INTELLIGENCE, STAT_SUBTERFUGE)
@@ -378,18 +378,32 @@ character with the most successes wins
 
 /datum/discipline_power/auspex/telepathy/pre_activation_checks(mob/living/target)
 	. = ..()
-	if(!telepathy_roll)
-		telepathy_roll = new()
-	telepathy_roll.difficulty = target.st_get_stat(STAT_TEMPORARY_WILLPOWER)
-	successes = telepathy_roll.st_roll(owner, target)
-	if(successes > 0)
 		// need linebreaks... but \n and <br> arent working...
 		var/telepathy_type = tgui_input_list(owner, "What kind of Telepathy would you like to perform? Reading the minds of supernaturals requires expending one temporary willpower point.", "Telepathy Type Selection", telepathy_types, TELEPATHY_IMPLANT_THOUGHT)
+		if(!telepathy_type)
+			return
 		switch(telepathy_type)
 			if(TELEPATHY_MIND_READING)
+			// TFN EDIT ADD START: Separate mind reading/implant thought cooldowns for auspex.
+				if(!COOLDOWN_FINISHED(src, mind_read_cd))
+					to_chat(owner, span_warning("Your mind reading ability is still on cooldown for [DisplayTimeText(COOLDOWN_TIMELEFT(src, mind_read_cd))]!"))
+					return
+
+				if(!telepathy_roll)
+					telepathy_roll = new()
+				telepathy_roll.difficulty = target.st_get_stat(STAT_TEMPORARY_WILLPOWER)
+				successes = telepathy_roll.st_roll(owner, target)
+
+				if(successes > 0)
+					if(get_kindred_splat(target) || get_shifter_splat(target))
+						owner.st_set_stat(STAT_TEMPORARY_WILLPOWER, owner.st_get_stat(STAT_TEMPORARY_WILLPOWER) - 1)
+				else
+					to_chat(owner, span_warning("You failed to read their mind!"))
+					COOLDOWN_START(src, mind_read_cd, 3 MINUTES)
+					return
+			// TFN EDIT ADD END
 				//var/supernatural_splat = issupernatural(target)??? the current issupernatural just checks for a single splat, which doesnt qualify for the -1 willpower, think its just other 'undead' p137 V20
-				if(get_kindred_splat(target) || get_shifter_splat(target))
-					owner.st_set_stat(STAT_TEMPORARY_WILLPOWER, owner.st_get_stat(STAT_TEMPORARY_WILLPOWER) - 1)
+
 			if(TELEPATHY_IMPLANT_THOUGHT)
 				var/disguise_voice_prompt = tgui_input_list(owner, "Attempt to disguise the origin of the implanted thought? Requires a Manipulation + Subterfuge roll at the difficulty of the target's Perception + Awareness", "Disguise Voice", list("Yes", "No"), "No")
 				switch(disguise_voice_prompt)
@@ -401,15 +415,13 @@ character with the most successes wins
 							if(ROLL_SUCCESS)
 								disguised_voice = tgui_input_text(owner, "What will be the 'voice' of this implanted thought?", "Implanted Voice Selection")
 							if(ROLL_FAILURE, ROLL_BOTCH)
-								to_chat(span_danger("You fail to disguise your voice - the subject hears your voice in their head!"))
+								to_chat(owner, span_danger("You fail to disguise your voice - the subject hears your voice in their head!"))
 								disguised_voice = owner.real_name
 					if("No")
 						disguised_voice = owner.real_name
+				do_cooldown()
 		telepathy_type_selected = telepathy_type
 		return TRUE
-	else
-		do_cooldown()
-		return FALSE
 
 
 /datum/discipline_power/auspex/telepathy/activate(mob/living/target)
@@ -454,7 +466,9 @@ character with the most successes wins
 			log_directed_talk(target, owner, input_message, LOG_SAY, "Telepathy (Mind Reading)")
 			message_admins("[target.real_name]'s (ckey: [target.key]) mind is read by [owner.real_name] (ckey: [owner.key]) who searched their mind for '[specific_search ? specific_search : "recent thoughts and emotions"]'. The owner intercepted the following thoughts or memories : [input_message]")
 			to_chat(owner, span_notice("You read [GET_GUESTBOOK_NAME(owner, target)]'s thoughts with [successes] successes: [input_message]"))
-
+		// TFN EDIT ADD START: Separate mind reading/implant thought cooldowns for auspex.
+			COOLDOWN_START(src, mind_read_cd, 3 MINUTES)
+		// TFN EDIT ADD END
 /datum/discipline_power/auspex/telepathy/proc/get_flavor_text(successes)
 	var/message = "As your mind is read with [successes] successes, "
 	switch(successes)
